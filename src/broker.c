@@ -1,5 +1,6 @@
 #include "broker.h"
 #include "mgos.h"
+#include "mgos_mqtt.h"
 
 static oa_entry broker_values[NUM_VALUES] = {0};
 
@@ -111,6 +112,25 @@ static void tcp_push (uint32_t ts, oa_tag tag, uint32_t value) {
   mbuf_free(&mb);
 }
 
+static void mqtt_push (uint32_t ts, oa_tag tag, uint32_t value) {
+
+  // assemble JSON
+  struct mbuf mb;
+  struct json_out jbuf = JSON_OUT_MBUF(&mb);
+  mbuf_init(&mb, 10); // arbitrary ...?
+  if (tag == 29) {
+    json_printf(&jbuf, "{dba:%u}", value);
+  }
+  if (tag == 30) {
+    json_printf(&jbuf, "{dbc:%u}", value);
+  }
+  if (mb.len > 0) {
+    LOG(LL_INFO,("Sending '%.*s'", mb.len, mb.buf));
+    mgos_mqtt_pub("mw/openair/807f4d84-d0f6-11e7-b63b-001999f98771", mb.buf, mb.len, 0 /* qos */, false /*will_retain*/);
+  }
+  mbuf_free(&mb);
+}
+
 void oa_broker_push(oa_tag tag, uint32_t value) {
   uint32_t ts = (uint32_t)(mgos_uptime()+0.5);
   broker_values[tag].ts = ts;
@@ -120,6 +140,9 @@ void oa_broker_push(oa_tag tag, uint32_t value) {
   // for now it's hard coded.
   if (mgos_sys_config_get_openair_firehose_en()) {
     tcp_push(ts, tag, value);
+  }
+  if (mgos_sys_config_get_openair_mqtt_en()) {
+    mqtt_push(ts, tag, value);
   }
 }
 
@@ -162,9 +185,9 @@ void alpha_cb(
   oa_broker_push(oa_alpha_8, alpha8);
 }
 
-void bme_cb(uint8_t idx, 
-    uint32_t p_raw, float p, 
-    uint32_t t_raw, float t, 
+void bme_cb(uint8_t idx,
+    uint32_t p_raw, float p,
+    uint32_t t_raw, float t,
     uint32_t h_raw, float h) {
   switch (idx) {
     case 0:
